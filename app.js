@@ -1,9 +1,17 @@
 const storageKey = "zfl18-boardgame-rule-cards";
 const today = new Date();
 
-const defaultState = {
-  selectedId: "",
-  games: [
+const ruleTypes = ["forgets", "disputes", "setup", "scoring"];
+const ruleLabels = {
+  forgets: "容易忘的规则",
+  disputes: "常见争议",
+  setup: "开局准备",
+  scoring: "计分提醒"
+};
+const validStatuses = ["clear", "stuck", "pending"];
+
+function buildDefaultGames() {
+  return [
     {
       id: crypto.randomUUID(),
       name: "奥尔良",
@@ -46,8 +54,65 @@ const defaultState = {
       setup: ["按人数放工厂圆盘", "每个圆盘补4块砖"],
       scoring: ["横竖相邻即时分", "完整行列和颜色终局加分"]
     }
-  ]
-};
+  ];
+}
+
+function snapshotGame(game) {
+  return {
+    name: game.name,
+    minPlayers: game.minPlayers,
+    maxPlayers: game.maxPlayers,
+    duration: game.duration,
+    complexity: game.complexity,
+    lastPlayed: game.lastPlayed,
+    cover: game.cover
+  };
+}
+
+function buildArchive(game, date) {
+  return {
+    id: crypto.randomUUID(),
+    gameId: game.id,
+    date,
+    game: snapshotGame(game),
+    rules: ruleTypes.flatMap((type) =>
+      game[type].map((text) => ({
+        id: crypto.randomUUID(),
+        type,
+        text,
+        status: "pending",
+        conclusion: ""
+      }))
+    )
+  };
+}
+
+function buildDefaultState() {
+  const games = buildDefaultGames();
+  // 一份示例复盘，演示归档日期、两类结果数量与待补状态
+  const sampleArchive = buildArchive(games[0], "2025-11-20");
+  const conclusions = {
+    0: ["clear", "规则书第5页：商站必须建在已有道路或水路连接的地点。"],
+    1: ["stuck", "口述和说明书不一致，下次带附录再核对抽袋时机。"],
+    2: ["clear", "先翻事件并结算，再执行玩家行动。"],
+    4: ["clear", "货物板块按2/3/4人图示摆放，开局前公放对照表。"],
+    5: ["clear", "起始资源每人一致，商人只放1个。"],
+    8: ["clear", "剩余建筑按半价折算金币，金币每5枚计1分。"]
+  };
+  sampleArchive.rules.forEach((rule, index) => {
+    const marked = conclusions[index];
+    if (marked) {
+      rule.status = marked[0];
+      rule.conclusion = marked[1];
+    }
+  });
+  return {
+    selectedId: games[0].id,
+    openArchiveId: "",
+    games,
+    archives: [sampleArchive]
+  };
+}
 
 let state = loadState();
 if (!state.selectedId) state.selectedId = state.games[0]?.id || "";
@@ -73,13 +138,45 @@ const els = {
   visibleCount: document.querySelector("#visibleCount")
 };
 
+function normalizeArchive(raw) {
+  const game = raw && typeof raw.game === "object" && raw.game ? raw.game : {};
+  const rules = Array.isArray(raw?.rules) ? raw.rules : [];
+  return {
+    id: typeof raw?.id === "string" ? raw.id : crypto.randomUUID(),
+    gameId: typeof raw?.gameId === "string" ? raw.gameId : "",
+    date: typeof raw?.date === "string" ? raw.date : "",
+    game: {
+      name: typeof game.name === "string" ? game.name : "已删除桌游",
+      minPlayers: Number(game.minPlayers) || 0,
+      maxPlayers: Number(game.maxPlayers) || 0,
+      duration: Number(game.duration) || 0,
+      complexity: typeof game.complexity === "string" ? game.complexity : "中",
+      lastPlayed: typeof game.lastPlayed === "string" ? game.lastPlayed : "",
+      cover: typeof game.cover === "string" ? game.cover : ""
+    },
+    rules: rules.map((rule) => ({
+      id: typeof rule?.id === "string" ? rule.id : crypto.randomUUID(),
+      type: ruleTypes.includes(rule?.type) ? rule.type : "forgets",
+      text: typeof rule?.text === "string" ? rule.text : "",
+      status: validStatuses.includes(rule?.status) ? rule.status : "pending",
+      conclusion: typeof rule?.conclusion === "string" ? rule.conclusion : ""
+    }))
+  };
+}
+
 function loadState() {
+  const defaults = buildDefaultState();
   const saved = localStorage.getItem(storageKey);
-  if (!saved) return structuredClone(defaultState);
+  if (!saved) return defaults;
   try {
-    return { ...structuredClone(defaultState), ...JSON.parse(saved) };
+    const parsed = JSON.parse(saved);
+    const merged = { ...defaults, ...parsed };
+    // 旧收藏升级：没有归档字段时补空数组，已有记录做字段归一化
+    merged.archives = Array.isArray(parsed.archives) ? parsed.archives.map(normalizeArchive) : [];
+    merged.openArchiveId = typeof parsed.openArchiveId === "string" ? parsed.openArchiveId : "";
+    return merged;
   } catch {
-    return structuredClone(defaultState);
+    return defaults;
   }
 }
 
@@ -94,6 +191,26 @@ function daysSince(dateString) {
 
 function getAllRules(game) {
   return [...game.forgets, ...game.disputes, ...game.setup, ...game.scoring];
+}
+
+function archiveStats(archive) {
+  return archive.rules.reduce(
+    (stats, rule) => {
+      stats[rule.status] += 1;
+      return stats;
+    },
+    { clear: 0, stuck: 0, pending: 0 }
+  );
+}
+
+function getGameArchives(gameId) {
+  return state.archives
+    .filter((archive) => archive.gameId === gameId)
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
+function getLatestArchive(gameId) {
+  return getGameArchives(gameId)[0] || null;
 }
 
 function getFilteredGames() {
@@ -124,6 +241,22 @@ function renderSummary() {
   els.staleGame.textContent = stale ? `${daysSince(stale.lastPlayed)}天` : "-";
 }
 
+function renderArchiveStrip(game) {
+  const archive = getLatestArchive(game.id);
+  if (!archive) {
+    return `<div class="archive-strip"><span class="muted">暂无复盘</span></div>`;
+  }
+  const stats = archiveStats(archive);
+  return `
+    <div class="archive-strip">
+      <span>复盘 ${archive.date}</span>
+      <span class="ok">已清楚 ${stats.clear}</span>
+      <span class="bad">仍卡住 ${stats.stuck}</span>
+      ${stats.pending ? `<span class="pending">待补 ${stats.pending}</span>` : ""}
+    </div>
+  `;
+}
+
 function renderList() {
   const games = getFilteredGames();
   els.visibleCount.textContent = `${games.length}个匹配`;
@@ -148,6 +281,7 @@ function renderList() {
                 <span class="pill">${game.duration}分钟</span>
                 <span class="pill heavy">${escapeHtml(game.complexity)}</span>
               </div>
+              ${renderArchiveStrip(game)}
             </div>
           </article>
         `;
@@ -156,6 +290,15 @@ function renderList() {
 }
 
 function renderDetail() {
+  if (state.openArchiveId) {
+    const archive = state.archives.find((item) => item.id === state.openArchiveId);
+    if (archive) {
+      renderArchiveDetail(archive);
+      return;
+    }
+    state.openArchiveId = "";
+  }
+
   const game = state.games.find((item) => item.id === state.selectedId) || state.games[0];
   if (!game) {
     els.detailView.innerHTML = `<p class="empty">先添加一个桌游。</p>`;
@@ -190,7 +333,9 @@ function renderDetail() {
         <textarea id="ruleTextInput" rows="3" placeholder="补充一条聚会前要看的提醒" required></textarea>
         <button class="primary" type="submit">加入规则卡片</button>
       </form>
+      ${renderArchiveHistory(game)}
       <div class="detail-actions">
+        <button id="archiveBtn" type="button">复盘归档</button>
         <button id="playedTodayBtn" type="button">标记今天玩过</button>
         <button id="deleteGameBtn" type="button">删除桌游</button>
       </div>
@@ -218,6 +363,133 @@ function renderRuleSection(title, key, items) {
       </ul>
     </section>
   `;
+}
+
+function renderArchiveHistory(game) {
+  const archives = getGameArchives(game.id);
+  return `
+    <section class="rule-section archive-history">
+      <h3>复盘记录</h3>
+      <ul class="archive-list">
+        ${
+          archives
+            .map((archive) => {
+              const stats = archiveStats(archive);
+              return `
+                <li class="archive-item" data-archive-id="${archive.id}">
+                  <div>
+                    <strong>${archive.date} 复盘</strong>
+                    <div class="archive-counts">
+                      <em class="clear">已解释清楚 ${stats.clear}</em>
+                      <em class="stuck">仍会卡住 ${stats.stuck}</em>
+                      ${stats.pending ? `<em class="pending">待补 ${stats.pending}</em>` : `<em class="done">全部处理</em>`}
+                    </div>
+                  </div>
+                  <span class="open-hint">查看 ›</span>
+                </li>
+              `;
+            })
+            .join("") || `<li class="archive-empty">暂无复盘。聚完一局点「复盘归档」，会快照当前资料和全部规则，之后修改收藏不影响旧记录。</li>`
+        }
+      </ul>
+    </section>
+  `;
+}
+
+function statusButton(rule, status, label) {
+  const pressed = rule.status === status;
+  return `
+    <button
+      type="button"
+      class="status-btn status-${status}"
+      data-rule-id="${rule.id}"
+      data-status="${status}"
+      aria-pressed="${pressed}"
+    >${label}</button>
+  `;
+}
+
+function renderArchiveRuleGroup(type, archive) {
+  const items = archive.rules.filter((rule) => rule.type === type);
+  if (!items.length) return "";
+  return `
+    <section class="rule-section archive-rule-section">
+      <h3>${ruleLabels[type]}</h3>
+      <ul class="archive-rule-list">
+        ${items
+          .map(
+            (rule) => `
+              <li class="archive-rule">
+                <p class="archive-rule-text">${escapeHtml(rule.text)}</p>
+                <div class="status-toggle" role="group" aria-label="复盘结果">
+                  ${statusButton(rule, "clear", "已解释清楚")}
+                  ${statusButton(rule, "stuck", "仍会卡住")}
+                  ${statusButton(rule, "pending", "待补")}
+                </div>
+                <textarea rows="2" data-conclusion-for="${rule.id}" placeholder="现场结论：当时怎么解释的、依据是什么…">${escapeHtml(rule.conclusion)}</textarea>
+              </li>
+            `
+          )
+          .join("")}
+      </ul>
+    </section>
+  `;
+}
+
+function renderArchiveDetail(archive) {
+  const info = archive.game;
+  const stats = archiveStats(archive);
+  els.detailView.innerHTML = `
+    <div class="quick-card archive-editor">
+      <button class="back-btn" id="archiveBackBtn" type="button">← 返回桌游详情</button>
+      <h2>${escapeHtml(info.name)} · 复盘归档</h2>
+      <div class="game-meta">
+        <span class="pill">归档日期 ${archive.date}</span>
+        <span class="pill">${info.minPlayers}-${info.maxPlayers}人</span>
+        <span class="pill">${info.duration}分钟</span>
+        <span class="pill heavy">${escapeHtml(info.complexity)}</span>
+      </div>
+      <div class="game-meta" id="archiveStatBar">
+        <span class="pill clear">已解释清楚 <b id="statClear">${stats.clear}</b></span>
+        <span class="pill stuck">仍会卡住 <b id="statStuck">${stats.stuck}</b></span>
+        <span class="pill pending ${stats.pending ? "" : "is-zero"}">待补 <b id="statPending">${stats.pending}</b></span>
+      </div>
+      <p class="archive-note">本记录保留的是当次桌游资料与规则原文，之后照常编辑收藏不会改变它。逐条标记结果并写下现场结论；没处理完的条目保持「待补」，下次可继续补充。</p>
+      ${ruleTypes.map((type) => renderArchiveRuleGroup(type, archive)).join("")}
+      <div class="archive-save">
+        <button class="primary" id="saveArchiveBtn" type="button">保存并返回详情</button>
+        <span id="archiveSavedHint" class="saved-hint"></span>
+      </div>
+    </div>
+  `;
+}
+
+function syncArchiveHeader(archive) {
+  const stats = archiveStats(archive);
+  const clearEl = els.detailView.querySelector("#statClear");
+  const stuckEl = els.detailView.querySelector("#statStuck");
+  const pendingEl = els.detailView.querySelector("#statPending");
+  const pendingPill = els.detailView.querySelector("#archiveStatBar .pill.pending");
+  if (clearEl) clearEl.textContent = stats.clear;
+  if (stuckEl) stuckEl.textContent = stats.stuck;
+  if (pendingEl) pendingEl.textContent = stats.pending;
+  if (pendingPill) pendingPill.classList.toggle("is-zero", stats.pending === 0);
+}
+
+function syncConclusionsFromForm() {
+  const archive = state.archives.find((item) => item.id === state.openArchiveId);
+  if (!archive) return;
+  els.detailView.querySelectorAll("[data-conclusion-for]").forEach((textarea) => {
+    const rule = archive.rules.find((item) => item.id === textarea.dataset.conclusionFor);
+    if (rule) rule.conclusion = textarea.value.trim();
+  });
+  saveState();
+}
+
+function closeArchiveView() {
+  syncConclusionsFromForm();
+  state.openArchiveId = "";
+  renderAll();
 }
 
 function renderAll() {
@@ -261,6 +533,7 @@ async function addGame(event) {
   };
   state.games.unshift(game);
   state.selectedId = game.id;
+  state.openArchiveId = "";
   els.gameForm.reset();
   setDefaultDate();
   renderAll();
@@ -291,6 +564,7 @@ els.gameList.addEventListener("click", (event) => {
   const card = event.target.closest("[data-game-id]");
   if (!card) return;
   state.selectedId = card.dataset.gameId;
+  state.openArchiveId = "";
   renderAll();
 });
 
@@ -306,10 +580,73 @@ els.detailView.addEventListener("submit", (event) => {
   renderAll();
 });
 
+els.detailView.addEventListener("input", (event) => {
+  const textarea = event.target.closest("[data-conclusion-for]");
+  if (!textarea || !state.openArchiveId) return;
+  const archive = state.archives.find((item) => item.id === state.openArchiveId);
+  const rule = archive?.rules.find((item) => item.id === textarea.dataset.conclusionFor);
+  if (rule) {
+    rule.conclusion = textarea.value;
+    saveState();
+  }
+});
+
+function handleArchiveClick(event) {
+  const archive = state.archives.find((item) => item.id === state.openArchiveId);
+  if (!archive) {
+    state.openArchiveId = "";
+    renderAll();
+    return;
+  }
+
+  const statusButtonEl = event.target.closest(".status-btn");
+  if (statusButtonEl) {
+    const rule = archive.rules.find((item) => item.id === statusButtonEl.dataset.ruleId);
+    if (!rule || !validStatuses.includes(statusButtonEl.dataset.status)) return;
+    rule.status = statusButtonEl.dataset.status;
+    saveState();
+    statusButtonEl
+      .closest(".status-toggle")
+      .querySelectorAll(".status-btn")
+      .forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.status === rule.status));
+      });
+    syncArchiveHeader(archive);
+    return;
+  }
+
+  if (event.target.closest("#archiveBackBtn")) {
+    closeArchiveView();
+    return;
+  }
+
+  if (event.target.closest("#saveArchiveBtn")) {
+    syncConclusionsFromForm();
+    const hint = els.detailView.querySelector("#archiveSavedHint");
+    if (hint) hint.textContent = "已保存";
+    state.openArchiveId = "";
+    renderAll();
+  }
+}
+
 els.detailView.addEventListener("click", (event) => {
+  if (state.openArchiveId) {
+    handleArchiveClick(event);
+    return;
+  }
+
+  const archiveEntry = event.target.closest("[data-archive-id]");
+  if (archiveEntry) {
+    syncConclusionsFromForm();
+    state.openArchiveId = archiveEntry.dataset.archiveId;
+    renderAll();
+    return;
+  }
+
   const ruleButton = event.target.closest("[data-rule-key]");
   const playedButton = event.target.closest("#playedTodayBtn");
   const deleteButton = event.target.closest("#deleteGameBtn");
+  const archiveButton = event.target.closest("#archiveBtn");
   const game = state.games.find((item) => item.id === state.selectedId);
   if (!game) return;
 
@@ -325,8 +662,17 @@ els.detailView.addEventListener("click", (event) => {
     renderAll();
   }
 
+  if (archiveButton) {
+    // 再次复盘新增一份快照，不覆盖前次记录
+    const archive = buildArchive(game, new Date().toISOString().slice(0, 10));
+    state.archives.unshift(archive);
+    state.openArchiveId = archive.id;
+    renderAll();
+  }
+
   if (deleteButton) {
     state.games = state.games.filter((item) => item.id !== game.id);
+    state.archives = state.archives.filter((item) => item.gameId !== game.id);
     state.selectedId = state.games[0]?.id || "";
     renderAll();
   }
