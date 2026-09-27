@@ -282,6 +282,146 @@ label {
   color: var(--lavender);
 }
 
+.pill.clear,
+.pill.done {
+  background: rgba(57, 116, 91, 0.12);
+  color: var(--green);
+}
+
+.pill.stuck {
+  background: rgba(179, 72, 72, 0.12);
+  color: var(--red);
+}
+
+.pill.pending {
+  background: rgba(213, 162, 61, 0.2);
+  color: #8a6414;
+}
+
+.archive-line {
+  margin-top: 8px;
+}
+
+.archives-section {
+  margin-top: 12px;
+}
+
+.archive-list {
+  display: grid;
+  gap: 8px;
+}
+
+details.archive {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+details.archive summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+details.archive summary::-webkit-details-marker {
+  display: none;
+}
+
+.archive-date {
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.archive-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.archive-body {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid #eef0f2;
+  padding: 10px;
+}
+
+.archive-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.archive-section h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.archive-items {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.archive-item {
+  display: grid;
+  gap: 7px;
+  border: 1px solid #eef0f2;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.archive-item.is-clear {
+  border-color: rgba(57, 116, 91, 0.5);
+}
+
+.archive-item.is-stuck {
+  border-color: rgba(179, 72, 72, 0.5);
+}
+
+.archive-text {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.archive-controls {
+  display: flex;
+  gap: 6px;
+}
+
+.status-btn {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-btn.active-clear {
+  border-color: var(--green);
+  background: var(--green);
+  color: #fff;
+}
+
+.status-btn.active-stuck {
+  border-color: var(--red);
+  background: var(--red);
+  color: #fff;
+}
+
+.archive-note {
+  padding: 7px 8px;
+  font-size: 12px;
+}
+
 .detail-panel {
   position: sticky;
   top: 18px;
